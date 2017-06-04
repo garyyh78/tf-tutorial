@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import tensorflow as tf
 
@@ -26,6 +27,7 @@ net_metadata = { 'input_size': MNIST_DIM * MNIST_DIM,
                  'learning_rate' : 0.0001,
                  'training_epoch' : 100,
                  'display_step' : 10,
+                 'model_path' : "./model/model.ckpt",
                  };
 
 # global data place holder for TF nodes
@@ -140,7 +142,14 @@ optimizer = tf.train.AdamOptimizer( net_metadata['learning_rate'] ).minimize(J)
 # Init & Train
 init = tf.global_variables_initializer()
 sess = tf.InteractiveSession()
-sess.run(init)
+saver = tf.train.Saver()
+
+if os.path.isdir( os.path.dirname( net_metadata['model_path'] ) ):
+    print( "continue with saved model .. \n" )
+    saver.restore(sess, net_metadata['model_path'] )
+else:
+    print( "start init ...\n" )
+    sess.run(init)
 
 for epoch in range(net_metadata['training_epoch']):
     
@@ -156,6 +165,8 @@ for epoch in range(net_metadata['training_epoch']):
 
     # Display logs per epoch step
     if epoch % net_metadata['display_step'] == 0:
+        saver.save(sess, net_metadata['model_path'])
         print("Epoch:", '%04d' % (epoch+1), "cost=", "{:.9f}".format(avg_cost))
+        
 
 sess.close()
