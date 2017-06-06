@@ -27,7 +27,7 @@ net_metadata = { 'input_size': MNIST_DIM * MNIST_DIM,
                  'learning_rate' : 0.0001,
                  'training_epoch' : 100,
                  'display_step' : 10,
-                 'model_path' : "./model/model.ckpt",
+                 'model_path' : "./model.vae/model.ckpt",
                  };
 
 # global data place holder for TF nodes
@@ -168,5 +168,4 @@ for epoch in range(net_metadata['training_epoch']):
         saver.save(sess, net_metadata['model_path'])
         print("Epoch:", '%04d' % (epoch+1), "cost=", "{:.9f}".format(avg_cost))
         
-
 sess.close()
