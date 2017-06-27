@@ -4,7 +4,9 @@ from collections import namedtuple
 import numpy as np
 import tensorflow as tf
 
-# text is char
+tf.train.get_checkpoint_state('./anna/')
+
+# text is int ( ascii values ) not char
 with tf.gfile.GFile("./anna/anna.txt", "r") as f: 
     text=f.read()
 
@@ -13,7 +15,7 @@ vocab = set(text)
 vocab_to_int = {c: i for i, c in enumerate(vocab)}
 int_to_vocab = dict(enumerate(vocab))
 encoded = np.array([vocab_to_int[c] for c in text], dtype=np.int32)
-print(len(encoded),"\n")
+print("anna text size = ", len(encoded),"\n")
 
 def get_batches(arr, n_seqs, n_steps):
     batch_size = n_seqs * n_steps
@@ -28,8 +30,6 @@ def get_batches(arr, n_seqs, n_steps):
 
 batches = get_batches(encoded, 10, 50)
 x, y = next(batches)
-print('x\n', x[:10, :10])
-print('\ny\n', y[:10, :10])
 
 def build_inputs(num_seqs, num_steps):
         
@@ -88,7 +88,6 @@ def build_optimizer(loss, learning_rate, grad_clip):
     
     return optimizer
 
-
 class CharRNN:
     
     def __init__(self, num_classes, batch_size=64, num_steps=50, 
@@ -116,51 +115,108 @@ class CharRNN:
         self.loss = build_loss(self.logits, self.targets, lstm_size, num_classes)
         self.optimizer = build_optimizer(self.loss, learning_rate, grad_clip)
 
+def pick_top_n(preds, vocab_size, top_n=5):
+   
+    p = np.squeeze(preds)    
+    p[np.argsort(p)[:-top_n]] = 0
+    p = p / np.sum(p)
+    c = np.random.choice(vocab_size, 1, p=p)[0]
+    return c
 
-batch_size = 10        
-num_steps = 10        
-lstm_size = 64        
+
+def sample(checkpoint, n_samples, lstm_size, vocab_size, prime="The "):
+       
+    samples = [c for c in prime]    
+    model = CharRNN(len(vocab), lstm_size=lstm_size, sampling=True)
+    saver = tf.train.Saver()
+    with tf.Session() as sess:
+        
+        saver.restore(sess, checkpoint)
+        new_state = sess.run(model.initial_state)
+        for c in prime:
+            x = np.zeros((1, 1))
+            
+            x[0,0] = vocab_to_int[ord(c)]
+            feed = {model.inputs: x,
+                    model.keep_prob: 1.,
+                    model.initial_state: new_state}
+            preds, new_state = sess.run([model.prediction, model.final_state], 
+                                         feed_dict=feed)
+
+        c = pick_top_n(preds, len(vocab))       
+        samples.append(chr(int_to_vocab[c]))        
+        
+        for i in range(n_samples):
+            x[0,0] = c
+            feed = {model.inputs: x,
+                    model.keep_prob: 1.,
+                    model.initial_state: new_state}
+            preds, new_state = sess.run([model.prediction, model.final_state], 
+                                         feed_dict=feed)
+
+            c = pick_top_n(preds, len(vocab))
+            samples.append(chr(int_to_vocab[c]))
+        
+    return ''.join(samples)
+
+batch_size = 100        
+num_steps = 100       
+lstm_size = 128       
 num_layers = 2          
 learning_rate = 0.001   
 keep_prob = 0.5
 
-epochs = 10
-save_every_n = 100
+mode = "gen"
 
-model = CharRNN(len(vocab), batch_size=batch_size, num_steps=num_steps,
+if mode == "train" :
+
+    epochs = 20
+    save_every_n = 100
+
+    model = CharRNN(len(vocab), batch_size=batch_size, num_steps=num_steps,
                 lstm_size=lstm_size, num_layers=num_layers, 
                 learning_rate=learning_rate)
 
-saver = tf.train.Saver(max_to_keep=100)
-with tf.Session() as sess:
-    sess.run(tf.global_variables_initializer())
+    saver = tf.train.Saver(max_to_keep=100)
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
     
-    counter = 0
-    for e in range(epochs):
-        # Train network
-        new_state = sess.run(model.initial_state)
-        loss = 0
-        for x, y in get_batches(encoded, batch_size, num_steps):
-            counter += 1
-            start = time.time()
-            feed = {model.inputs: x,
-                    model.targets: y,
-                    model.keep_prob: keep_prob,
-                    model.initial_state: new_state}
-            batch_loss, new_state, _ = sess.run([model.loss, 
+        counter = 0
+        for e in range(epochs):
+            # Train network
+            new_state = sess.run(model.initial_state)
+            loss = 0
+            for x, y in get_batches(encoded, batch_size, num_steps):
+                counter += 1
+                start = time.time()
+                feed = {model.inputs: x,
+                        model.targets: y,
+                        model.keep_prob: keep_prob,
+                        model.initial_state: new_state}
+                batch_loss, new_state, _ = sess.run([model.loss, 
                                                  model.final_state, 
                                                  model.optimizer], 
                                                  feed_dict=feed)
             
-            end = time.time()
-            # control the print lines
-            if counter % 10 == 0:
-                print('epoch: {}/{}... '.format(e+1, epochs),
-                      'counter: {}... '.format(counter),
-                      'loss: {:.4f}... '.format(batch_loss),
-                      '{:.4f} sec/batch'.format((end-start)))
+                end = time.time()
+            
+                # log & save
+                if counter % save_every_n == 0:
+                    print('epoch: {}/{}... '.format(e+1, epochs),
+                          'counter: {}... '.format(counter),
+                          'loss: {:.4f}... '.format(batch_loss),
+                          '{:.4f} sec/batch'.format((end-start)))
+            
+                    saver.save(sess, "./anna/i{}_l{}.ckpt".format(counter, lstm_size))
 
-            if (counter % save_every_n == 0):
-                saver.save(sess, "checkpoints/i{}_l{}.ckpt".format(counter, lstm_size))
+        # final save
+        saver.save(sess, "./anna/i{}_l{}.ckpt".format(counter, lstm_size))
+
+if mode == "gen":
+    chkpt_list = tf.train.get_checkpoint_state('./anna/')
+    print(chkpt_list,"\n")    
+    checkpoint = tf.train.latest_checkpoint('./anna/')
+    print(checkpoint,"\n")
     
-    saver.save(sess, "checkpoints/i{}_l{}.ckpt".format(counter, lstm_size))
+    samp = sample(checkpoint, 500, lstm_size, len(vocab), prime="The")
+    print(samp,"\n")
